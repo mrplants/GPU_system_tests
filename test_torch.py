@@ -22,15 +22,15 @@ class GPUTorchTest(unittest.TestCase):
 
         # check if there is any NaN in the numpy array
         has_nan = torch.isnan(d).any().item()
-        self.assertFalse(has_nan, "NaN values found in the calculations on GPU")
+        self.assertFalse(has_nan, "NaN values found in the calculations on GPU {gpu_id}.")
 
     def util_test_tensor_operation(self, gpu_id):
         device = torch.device(f'cuda:{gpu_id}')
         a = torch.tensor([1.0, 2.0, 3.0], device=device)
         b = torch.tensor([4.0, 5.0, 6.0], device=device)
         c = a + b
-        self.assertTrue(isinstance(c, torch.Tensor))
-        self.assertEqual(c.cpu().numpy().tolist(), [5.0, 7.0, 9.0])
+        self.assertTrue(isinstance(c, torch.Tensor), f'GPU {gpu_id} failed basic tensor operation test because c is not a tensor')
+        self.assertEqual(c.cpu().numpy().tolist(), [5.0, 7.0, 9.0], f'GPU {gpu_id} failed basic tensor operation test because c is not correct')
 
     def util_test_gradient(self, gpu_id):
         device = torch.device(f'cuda:{gpu_id}')
@@ -38,8 +38,8 @@ class GPUTorchTest(unittest.TestCase):
         y = x ** 2
         y.sum().backward()
         expected_gradient = torch.tensor([4.0, 6.0, 8.0], device=device)
-        self.assertTrue(isinstance(x.grad, torch.Tensor))
-        self.assertTrue(torch.allclose(expected_gradient, x.grad, atol=1e-6))
+        self.assertTrue(isinstance(x.grad, torch.Tensor), f'GPU {gpu_id} failed gradient test because x.grad is not a tensor')
+        self.assertTrue(torch.allclose(expected_gradient, x.grad, atol=1e-6), f'GPU {gpu_id} failed gradient test because x.grad is not correct')
 
     def util_test_model_fit(self, gpu_id):
         device = torch.device(f'cuda:{gpu_id}')
@@ -57,7 +57,12 @@ class GPUTorchTest(unittest.TestCase):
         trainloader = torch.utils.data.DataLoader(trainset, batch_size=32, shuffle=True, num_workers=2)
         criterion = torch.nn.CrossEntropyLoss()
         optimizer = torch.optim.Adam(model.parameters())
-        for epoch in range(1):  # loop over the dataset once
+        loss_values = []
+        acc_values = []
+        for epoch in range(2):  # loop over the dataset more than once
+            running_loss = 0.0
+            correct = 0
+            total = 0
             for inputs, labels in trainloader:
                 inputs, labels = inputs.view(-1, 784).to(device), labels.to(device)
                 optimizer.zero_grad()
@@ -65,6 +70,18 @@ class GPUTorchTest(unittest.TestCase):
                 loss = criterion(outputs, labels)
                 loss.backward()
                 optimizer.step()
+                
+                running_loss += loss.item()
+                _, predicted = outputs.max(1)
+                total += labels.size(0)
+                correct += predicted.eq(labels).sum().item()
+
+            loss_values.append(running_loss / len(trainloader))
+            acc_values.append(100. * correct / total)
+        
+        # Check that loss has decreased and accuracy has increased over epochs
+        self.assertGreater(loss_values[0], loss_values[-1], f'GPU {gpu_id} failed to decrease loss during model training test')
+        self.assertLess(acc_values[0], acc_values[-1], f'GPU {gpu_id} failed to increase accuracy during model training test')
 
     def setUp(self):
         # Set up any common resources or test dependencies
@@ -77,25 +94,21 @@ class GPUTorchTest(unittest.TestCase):
     def test_torch_cuda_available(self):
         self.assertTrue(torch.cuda.is_available())
 
-    def test_torch_tensor_operation_on_gpu_0(self):
-        self.util_test_tensor_operation(0)
-    def test_torch_tensor_operation_on_gpu_1(self):
-        self.util_test_tensor_operation(1)
+    def test_torch_tensor_operation(self):
+        for GPU_id in range(self.gpus):
+            self.util_test_tensor_operation(GPU_id)
 
-    def test_torch_gradient_on_gpu_0(self):
-        self.util_test_gradient(0)
-    def test_torch_gradient_on_gpu_1(self):
-        self.util_test_gradient(1)
+    def test_torch_gradient(self):
+        for GPU_id in range(self.gpus):
+            self.util_test_gradient(GPU_id)
 
-    def test_torch_model_training_on_gpu_0(self):
-        self.util_test_model_fit(0)
-    def test_torch_model_training_on_gpu_1(self):
-        self.util_test_model_fit(1)
+    def test_torch_model_training(self):
+        for GPU_id in range(self.gpus):
+            self.util_test_model_fit(GPU_id)
 
-    def test_torch_nan_on_gpu_0(self):
-        self.util_test_nan(0)
-    def test_torch_nan_on_gpu_1(self):
-        self.util_test_nan(1)
+    def test_torch_nan(self):
+        for GPU_id in range(self.gpus):
+            self.util_test_nan(GPU_id)
 
 if __name__ == '__main__':
     unittest.main()
